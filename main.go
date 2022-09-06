@@ -47,11 +47,7 @@ func main() {
 				bot.Send(msg)
 
 			case "reset_cancel":
-				err := db.ClearTodayProgress(update.CallbackQuery.From.ID)
 
-				if err != nil {
-					panic(err)
-				}
 				msg := tgbotapi.NewDeleteMessage(update.CallbackQuery.From.ID, update.CallbackQuery.Message.MessageID)
 				bot.Send(msg)
 
