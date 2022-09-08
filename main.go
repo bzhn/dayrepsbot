@@ -23,15 +23,12 @@ var lastButton = make(map[int64]string)
 var lastCommand = make(map[int64]string)
 
 func main() {
-
-	fmt.Println(db.GetRepsID(770772106, "Pullups"))
-
 	bot, err := tgbotapi.NewBotAPI(db.TGToken)
 	if err != nil {
 		panic(err)
 	}
 
-	bot.Debug = true
+	bot.Debug = false
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
@@ -92,14 +89,19 @@ func main() {
 			// Extract the command from the Message.
 			switch update.Message.Command() {
 			case "start":
-				fmt.Println("Got start command")
+				msg.Text = "Successfully added you to database."
 				err := db.AddUser(update.Message.From.ID, update.Message.From.FirstName)
 
 				if err != nil {
-					panic(err)
+					if err == db.UserExists {
+						msg.Text = "Welcome back! What about workout?"
+						fmt.Println("User already exist")
+					} else {
+						panic(err)
+					}
 				}
 
-				msg.Text = "Successfully added you to database."
+				deleteLast(update.Message.Chat.ID)
 
 			case "name":
 				msg.Text = "Please write how to address you"
@@ -107,6 +109,7 @@ func main() {
 				msg.Text = "Okay, what's the name of your exercise?"
 			case "stats":
 				msg.Text = "I'm ok."
+				deleteLast(update.Message.Chat.ID)
 			case "reset":
 				msg.Text = "⚠️ Are you sure you want to remove your progress?"
 				msg.ReplyMarkup = IKBresetConfirm
@@ -171,8 +174,9 @@ func main() {
 			continue
 		}
 
-		// If the user sent a number
-		if n, err := strconv.Atoi(update.Message.Text); err == nil {
+		// If the user sent a number after click on the button
+		_, wasButton := lastButton[update.Message.From.ID]
+		if n, err := strconv.Atoi(update.Message.Text); err == nil && wasButton {
 			if n > 2147483647 {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Sorry, amount of reps is too big!")
 				if _, err := bot.Send(msg); err != nil {
@@ -190,9 +194,10 @@ func main() {
 			if _, err := bot.Send(msg); err != nil {
 				panic(err)
 			}
-		} else {
+		} else { // If user sent text, but not a number
 			if db.IfButton(update.Message.Chat.ID, update.Message.Text) {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Reps of "+update.Message.Text+"\n\nOkay, please type the amount of reps you made:")
+				lastButton[update.Message.Chat.ID] = update.Message.Text
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Reps of "+update.Message.Text+". \nYou already done "+fmt.Sprintf("%d", db.GetTodaysAmount(update.Message.Chat.ID, lastButton[update.Message.From.ID]))+" reps. \n\nOkay, please type the amount of reps you made:")
 
 				if _, err := bot.Send(msg); err != nil {
 					panic(err)

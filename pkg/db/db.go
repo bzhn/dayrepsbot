@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -20,6 +21,8 @@ var TGToken string
 
 // Prepared database Statements
 var ps = make(map[string]*sql.Stmt)
+
+var UserExists = errors.New("User exists")
 
 func init() {
 	err := godotenv.Load(".env")
@@ -90,6 +93,14 @@ WHERE p.telegram_id = ?;`)
 	}
 	ps["getusername"] = gtunm
 
+	gtuid, err := DB.Prepare(`SELECT p.telegram_id
+FROM person p
+WHERE p.telegram_id = ?;`)
+	if err != nil {
+		panic(err)
+	}
+	ps["userexistsid"] = gtuid
+
 	gtrpid, err := DB.Prepare(`SELECT dr.reps_id
 	FROM dct_reps dr
 	WHERE dr.telegram_id = ?
@@ -118,7 +129,13 @@ WHERE p.telegram_id = ?;`)
 }
 
 func userExists(userID int64) bool {
-	return false
+	var user string
+
+	if err := ps["userexistsid"].QueryRow(userID).Scan(&user); err != nil {
+		return false
+	}
+
+	return true
 }
 
 func Increment(userID int64, reps int, repsName string) (int, error) {
@@ -129,14 +146,24 @@ func Increment(userID int64, reps int, repsName string) (int, error) {
 	}
 	fmt.Println(res)
 
-	var curReps int
-	ps["todayamount"].QueryRow(GetUserDate(userID), GetRepsID(userID, repsName)).Scan(&curReps) // TODO: Provide the reps name
+	return GetTodaysAmount(userID, repsName), nil
+}
 
-	return curReps, nil
+func GetTodaysAmount(userID int64, repsName string) int {
+	var curReps int
+	err := ps["todayamount"].QueryRow(GetUserDate(userID), GetRepsID(userID, repsName)).Scan(&curReps)
+	if err != nil {
+		return 0
+	}
+
+	return curReps
+
 }
 
 func AddUser(userID int64, userName string) error {
-
+	if userExists(userID) {
+		return UserExists
+	}
 	res, err := ps["adduser"].Exec(userID, userName, userName)
 	if err != nil {
 		return err
@@ -191,7 +218,7 @@ func GetUserName(userID int64) string {
 func GetRepsID(userID int64, repsName string) int {
 	var rpid int
 	if err := ps["getrepsid"].QueryRow(userID, repsName).Scan(&rpid); err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	return rpid
 }
@@ -230,6 +257,14 @@ func UserKeyboard(userID int64) tgbotapi.ReplyKeyboardMarkup {
 		allExercises = append(allExercises, nextExercise)
 	}
 
+	if len(allExercises) == 0 {
+		return tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("You haven't added any exercises"),
+			),
+		)
+	}
+
 	for i := len(allExercises); i > 0; {
 		if i >= 2 {
 			ButtonRows = append(ButtonRows, tgbotapi.NewKeyboardButtonRow(
@@ -254,7 +289,6 @@ func UserKeyboard(userID int64) tgbotapi.ReplyKeyboardMarkup {
 func IfButton(userID int64, textToCheck string) bool {
 	var smthng int
 	if err := ps["getrepsid"].QueryRow(userID, textToCheck).Scan(&smthng); err != nil {
-		fmt.Println(err)
 		return false
 	}
 	return true
