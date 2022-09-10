@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 
 	db "github.com/bzhn/dayrepsbot/pkg/db"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/joho/godotenv"
 )
 
 var IKBresetConfirm = tgbotapi.NewInlineKeyboardMarkup(
@@ -22,11 +25,10 @@ var IKBresetConfirm = tgbotapi.NewInlineKeyboardMarkup(
 var lastButton = make(map[int64]string)
 var lastCommand = make(map[int64]string)
 
+var bot *tgbotapi.BotAPI
+
 func main() {
-	bot, err := tgbotapi.NewBotAPI(db.TGToken)
-	if err != nil {
-		panic(err)
-	}
+	bot, _ = tgbotapi.NewBotAPI(db.TGToken)
 
 	bot.Debug = false
 
@@ -40,6 +42,12 @@ func main() {
 	for update := range updates {
 		if update.CallbackQuery != nil {
 			msg := tgbotapi.NewMessage(update.CallbackQuery.From.ID, "")
+			if !db.UserExists(update.CallbackQuery.From.ID) {
+				msg.Text = "Sorry, but you are not authorised yet. Please type /name to add your <b>name<b>."
+				if _, err := bot.Send(msg); err != nil {
+					sendErrorToAdmin(update.CallbackQuery.From, err)
+				}
+			}
 
 			switch update.CallbackQuery.Data {
 			case "reset_today":
@@ -93,11 +101,11 @@ func main() {
 				err := db.AddUser(update.Message.From.ID, update.Message.From.FirstName)
 
 				if err != nil {
-					if err == db.UserExists {
+					if err == db.ErrUserExists {
 						msg.Text = "Welcome back! What about workout?"
 						fmt.Println("User already exist")
 					} else {
-						panic(err)
+						sendErrorToAdmin(update.Message.From, err)
 					}
 				}
 
@@ -143,7 +151,7 @@ func main() {
 			case "newexercise":
 				err := db.AddNewExercise(update.Message.Chat.ID, update.Message.Text)
 				if err != nil {
-					panic(err)
+					sendErrorToAdmin(update.Message.From, errors.New(fmt.Sprint("<code>/newexercise</code>:", err)))
 				}
 				msg.Text = "Your exercise have been added!"
 				msg.ReplyMarkup = db.UserKeyboard(update.Message.Chat.ID)
@@ -169,7 +177,7 @@ func main() {
 			}
 
 			if _, err := bot.Send(msg); err != nil {
-				panic(err)
+				sendErrorToAdmin(update.Message.From, err)
 			}
 			continue
 		}
@@ -180,19 +188,19 @@ func main() {
 			if n > 2147483647 {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Sorry, amount of reps is too big!")
 				if _, err := bot.Send(msg); err != nil {
-					panic(err)
+					sendErrorToAdmin(update.Message.From, err)
 				}
 			}
 
 			curReps, err := db.Increment(update.Message.From.ID, n, lastButton[update.Message.From.ID])
 			if err != nil {
-				panic(err)
+				sendErrorToAdmin(update.Message.From, err)
 			}
 
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf("You have done %d reps today!", curReps))
 
 			if _, err := bot.Send(msg); err != nil {
-				panic(err)
+				sendErrorToAdmin(update.Message.From, err)
 			}
 		} else { // If user sent text, but not a number
 			if db.IfButton(update.Message.Chat.ID, update.Message.Text) {
@@ -200,7 +208,7 @@ func main() {
 				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Reps of "+update.Message.Text+". \nYou already done "+fmt.Sprintf("%d", db.GetTodaysAmount(update.Message.Chat.ID, lastButton[update.Message.From.ID]))+" reps. \n\nOkay, please type the amount of reps you made:")
 
 				if _, err := bot.Send(msg); err != nil {
-					panic(err)
+					sendErrorToAdmin(update.Message.From, err)
 				}
 				lastButton[update.Message.Chat.ID] = update.Message.Text
 
@@ -209,7 +217,7 @@ func main() {
 
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Sorry, I don't understand")
 			if _, err := bot.Send(msg); err != nil {
-				panic(err)
+				sendErrorToAdmin(update.Message.From, err)
 			}
 		}
 
@@ -231,5 +239,23 @@ func deleteLast(userID int64) {
 
 	if _, ok := lastButton[userID]; ok {
 		delete(lastButton, userID)
+	}
+}
+
+func sendErrorToAdmin(usr *tgbotapi.User, usrError error) {
+	err := godotenv.Load(".env")
+	if err != nil {
+		panic(err)
+	}
+
+	adm_id, err := strconv.Atoi(os.Getenv("ADMIN_TG_ID"))
+	if err != nil {
+		panic("Can't read ADMIN_TG_ID\n" + fmt.Sprint(err))
+	}
+
+	msg := tgbotapi.NewMessage(int64(adm_id), fmt.Sprintf("Error\n\nUser %s with id <code>%d</code> got the next error: %s", usr.FirstName, usr.ID, usrError))
+	msg.ParseMode = tgbotapi.ModeHTML
+	if _, err := bot.Send(msg); err != nil {
+		panic(err)
 	}
 }

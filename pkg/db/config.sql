@@ -62,9 +62,3 @@ language_code varchar(5) NOT NULL,
 language_name varchar(50) NOT NULL,
 PRIMARY KEY(language_id)
 );
-
-
-SELECT p.person_name, r.reps_amount, dr.reps_name, r.reps_date FROM reps r
-LEFT JOIN dct_reps dr ON dr.reps_id = r.reps_id
-LEFT JOIN person p ON p.telegram_id = dr.telegram_id
-;

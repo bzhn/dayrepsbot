@@ -14,15 +14,16 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-var Mysql_connection string
-var DB *sql.DB
-var err error
-var TGToken string
+var (
+	Mysql_connection string
+	DB               *sql.DB
+	err              error
+	ErrUserExists    = errors.New("User exists")
+	TGToken          string
+)
 
 // Prepared database Statements
 var ps = make(map[string]*sql.Stmt)
-
-var UserExists = errors.New("User exists")
 
 func init() {
 	err := godotenv.Load(".env")
@@ -128,7 +129,7 @@ WHERE p.telegram_id = ?;`)
 
 }
 
-func userExists(userID int64) bool {
+func UserExists(userID int64) bool {
 	var user string
 
 	if err := ps["userexistsid"].QueryRow(userID).Scan(&user); err != nil {
@@ -161,8 +162,8 @@ func GetTodaysAmount(userID int64, repsName string) int {
 }
 
 func AddUser(userID int64, userName string) error {
-	if userExists(userID) {
-		return UserExists
+	if UserExists(userID) {
+		return ErrUserExists
 	}
 	res, err := ps["adduser"].Exec(userID, userName, userName)
 	if err != nil {
